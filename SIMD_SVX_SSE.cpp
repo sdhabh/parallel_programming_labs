@@ -12,6 +12,8 @@
 #include <chrono>
 using namespace std;
 
+
+
 const int n = 3000;
 float A[n][n];
 
