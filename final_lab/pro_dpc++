@@ -1,0 +1,159 @@
+%% writefile lab / simple.cpp
+#include <CL/sycl.hpp>
+#include <dpct/dpct.hpp>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+#include <chrono>
+
+using namespace std;
+using namespace sycl;
+
+const int Num = 1362;
+const int pasNum = 54274;
+const int lieNum = 43577;
+
+unsigned int Act[lieNum][Num + 1] = { 0 };
+unsigned int Pas[pasNum][Num + 1] = { 0 };
+
+// 消元子初始化
+void init_A() {
+    unsigned int a;
+    ifstream infile("act3.txt");
+    char fin[10000] = { 0 };
+    int index;
+    while (infile.getline(fin, sizeof(fin))) {
+        std::stringstream line(fin);
+        int biaoji = 0;
+        while (line >> a) {
+            if (biaoji == 0) {
+                index = a;
+                biaoji = 1;
+            }
+            int k = a % 32;
+            int j = a / 32;
+            int temp = 1 << k;
+            Act[index][Num - 1 - j] += temp;
+            Act[index][Num] = 1;
+        }
+    }
+}
+
+// 被消元行初始化
+void init_P() {
+    unsigned int a;
+    ifstream infile("pas3.txt");
+    char fin[10000] = { 0 };
+    int index = 0;
+    while (infile.getline(fin, sizeof(fin))) {
+        std::stringstream line(fin);
+        int biaoji = 0;
+        while (line >> a) {
+            if (biaoji == 0) {
+                Pas[index][Num] = a;
+                biaoji = 1;
+            }
+            int k = a % 32;
+            int j = a / 32;
+            int temp = 1 << k;
+            Pas[index][Num - 1 - j] += temp;
+        }
+        index++;
+    }
+}
+
+void f_dpcpp(queue& q) {
+    buffer<unsigned int, 2> buf_Act((unsigned int*)Act, range<2>(lieNum, Num + 1));
+    buffer<unsigned int, 2> buf_Pas((unsigned int*)Pas, range<2>(pasNum, Num + 1));
+
+    q.submit([&](handler& h) {
+        auto Act = buf_Act.get_access<access::mode::read_write>(h);
+        auto Pas = buf_Pas.get_access<access::mode::read_write>(h);
+
+        h.parallel_for(range<2>(pasNum, Num), [=](id<2> idx) {
+            int j = idx[0];
+            int k = idx[1];
+
+            for (int i = lieNum - 1; i - 8 >= -1; i -= 8) {
+                while (Pas[j][Num] <= i && Pas[j][Num] >= i - 7) {
+                    int index = Pas[j][Num];
+                    if (Act[index][Num] == 1) {
+                        for (int k = 0; k < Num; k++) {
+                            Pas[j][k] = Pas[j][k] ^ Act[index][k];
+                        }
+                        int num = 0, S_num = 0;
+                        for (num = 0; num < Num; num++) {
+                            if (Pas[j][num] != 0) {
+                                unsigned int temp = Pas[j][num];
+                                while (temp != 0) {
+                                    temp = temp >> 1;
+                                    S_num++;
+                                }
+                                S_num += num * 32;
+                                break;
+                            }
+                        }
+                        Pas[j][Num] = S_num - 1;
+                    }
+                    else {
+                        for (int k = 0; k < Num; k++)
+                            Act[index][k] = Pas[j][k];
+
+                        Act[index][Num] = 1;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = lieNum % 8 - 1; i >= 0; i--) {
+                while (Pas[j][Num] == i) {
+                    if (Act[i][Num] == 1) {
+                        for (int k = 0; k < Num; k++) {
+                            Pas[j][k] = Pas[j][k] ^ Act[i][k];
+                        }
+                        int num = 0, S_num = 0;
+                        for (num = 0; num < Num; num++) {
+                            if (Pas[j][num] != 0) {
+                                unsigned int temp = Pas[j][num];
+                                while (temp != 0) {
+                                    temp = temp >> 1;
+                                    S_num++;
+                                }
+                                S_num += num * 32;
+                                break;
+                            }
+                        }
+                        Pas[j][Num] = S_num - 1;
+                    }
+                    else {
+                        for (int k = 0; k < Num; k++)
+                            Act[i][k] = Pas[j][k];
+
+                        Act[i][Num] = 1;
+                        break;
+                    }
+                }
+            }
+            });
+        });
+}
+
+int main() {
+    double seconds;
+
+    init_A();
+    init_P();
+
+    auto start = chrono::high_resolution_clock::now();
+
+    queue q;
+    f_dpcpp(q);
+    q.wait_and_throw();
+
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> elapsed = end - start;
+    seconds = elapsed.count() * 1000; // Convert to milliseconds
+    cout << "f_dpcpp: " << seconds << " ms" << std::endl;
+
+    return 0;
+}
