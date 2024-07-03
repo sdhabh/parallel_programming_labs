@@ -1,0 +1,184 @@
+ #include <omp.h>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+#include <vector>
+#include <immintrin.h>
+#include <windows.h>
+using namespace std;
+
+// 线程数定义
+const int NUM_THREADS = 7;
+
+
+
+
+/*
+
+unsigned int Act[23045][722] = { 0 };
+unsigned int Pas[23045][722] = { 0 };
+
+
+
+
+
+unsigned int Act[37960][1188] = { 0 };
+unsigned int Pas[37960][1188] = { 0 };
+const int Num = 1187;
+const int pasNum = 14921;
+const int lieNum = 37960;
+
+// 全局变量定义
+const int Num = 1362;  // 每行的元素个数
+const int pasNum = 54274;
+const int lieNum = 43577;
+
+*/
+
+
+const int Num = 721;
+const int pasNum = 14325;
+const int lieNum = 23045;
+
+struct SparseMatrix {
+    vector<vector<unsigned int>> values;
+    vector<vector<int>> col_indices;
+    vector<int> row_pointers;
+};
+
+// 初始化稀疏矩阵
+void init_SparseMatrix(SparseMatrix& mat, const string& filename, int rows, int cols) {
+    mat.values.resize(rows);
+    mat.col_indices.resize(rows);
+    mat.row_pointers.resize(rows + 1, 0);
+
+    ifstream infile(filename);
+    string line;
+    unsigned int a;
+
+    while (getline(infile, line)) {
+        stringstream ss(line);
+        int row = -1;
+        while (ss >> a) {
+            if (row == -1) {
+                row = a;
+            }
+            else {
+                mat.values[row].push_back(1 << (a % 32));
+                mat.col_indices[row].push_back(cols - 1 - a / 32);
+            }
+        }
+        if (row != -1) {
+            mat.row_pointers[row + 1]++;
+        }
+    }
+
+    for (int i = 1; i < mat.row_pointers.size(); ++i) {
+        mat.row_pointers[i] += mat.row_pointers[i - 1];
+    }
+}
+
+void f_omp_avx512(SparseMatrix& Act, SparseMatrix& Pas) {
+#pragma omp parallel num_threads(NUM_THREADS)
+    {
+        int i, j, k;
+        __m512 va_Pas, va_Act;
+
+#pragma omp for
+        for (i = lieNum - 1; i >= 15; i -= 16) {
+            for (j = 0; j < pasNum; j++) {
+                while (Pas.row_pointers[j] <= i && Pas.row_pointers[j] >= i - 15) {
+                    int index = Pas.row_pointers[j];
+                    if (!Act.values[index].empty()) {
+                        for (k = 0; k + 16 <= Num; k += 16) {
+                            va_Pas = _mm512_loadu_ps((float*)&(Pas.values[j][k]));
+                            va_Act = _mm512_loadu_ps((float*)&(Act.values[index][k]));
+                            va_Pas = _mm512_xor_ps(va_Pas, va_Act);
+                            _mm512_storeu_ps((float*)&(Pas.values[j][k]), va_Pas);
+                        }
+                        for (; k < Num; k++) {
+                            Pas.values[j][k] ^= Act.values[index][k];
+                        }
+                        int S_num = 0;
+                        for (k = 0; k < Num; k++) {
+                            if (Pas.values[j][k] != 0) {
+                                unsigned int temp = Pas.values[j][k];
+                                while (temp != 0) {
+                                    temp >>= 1;
+                                    S_num++;
+                                }
+                                S_num += k * 32;
+                                break;
+                            }
+                        }
+                        Pas.row_pointers[j] = S_num - 1;
+                    }
+                    else {
+                        Act.values[index] = Pas.values[j];
+                        Act.row_pointers[index] = 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+#pragma omp for
+        for (i = lieNum % 16 - 1; i >= 0; i--) {
+            for (j = 0; j < pasNum; j++) {
+                while (Pas.row_pointers[j] == i) {
+                    if (!Act.values[i].empty()) {
+                        for (k = 0; k + 16 <= Num; k += 16) {
+                            va_Pas = _mm512_loadu_ps((float*)&(Pas.values[j][k]));
+                            va_Act = _mm512_loadu_ps((float*)&(Act.values[i][k]));
+                            va_Pas = _mm512_xor_ps(va_Pas, va_Act);
+                            _mm512_storeu_ps((float*)&(Pas.values[j][k]), va_Pas);
+                        }
+                        for (; k < Num; k++) {
+                            Pas.values[j][k] ^= Act.values[i][k];
+                        }
+                        int S_num = 0;
+                        for (k = 0; k < Num; k++) {
+                            if (Pas.values[j][k] != 0) {
+                                unsigned int temp = Pas.values[j][k];
+                                while (temp != 0) {
+                                    temp >>= 1;
+                                    S_num++;
+                                }
+                                S_num += k * 32;
+                                break;
+                            }
+                        }
+                        Pas.row_pointers[j] = S_num - 1;
+                    }
+                    else {
+                        Act.values[i] = Pas.values[j];
+                        Act.row_pointers[i] = 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+int main() {
+    SparseMatrix Act, Pas;
+    init_SparseMatrix(Act, "act3.txt", lieNum, Num);
+    init_SparseMatrix(Pas, "pas3.txt", pasNum, Num);
+
+
+
+    double seconds = 0;
+    long long head, tail, freq, noww;
+
+
+    QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+    QueryPerformanceCounter((LARGE_INTEGER*)&head);//开始计时
+    f_omp_avx512(Act, Pas);
+    QueryPerformanceCounter((LARGE_INTEGER*)&tail);//结束计时
+    seconds = (tail - head) * 100.0 / freq;//单位 ms
+    cout << "f_omp_avx512:" << seconds << 'ms' << endl;
+
+
+    return 0;
+}
