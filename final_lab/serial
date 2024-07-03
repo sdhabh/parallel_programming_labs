@@ -4,7 +4,6 @@
 #include <windows.h>
 
 
-
 using namespace std;
 
 const int n = 3000;
