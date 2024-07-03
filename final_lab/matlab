@@ -1,0 +1,81 @@
+function main()
+    % 主函数
+    n = 2000;
+
+    % 启用并行池
+    if isempty(gcp('nocreate'))
+        parpool('local'); % 可以指定工作者数量，如 parpool('local', 4)
+    end
+
+
+    A = init_matrix_parallel(n);
+    disp('Matrix after initialization:');
+    disp(A(1:5, 1:5));  % 显示初始化后矩阵的前5x5部分
+
+    % 绘制初始化后的矩阵
+    figure;
+    imagesc(A);
+    colorbar;
+    title('Matrix after initialization');
+    xlabel('Column Index');
+    ylabel('Row Index');
+    saveas(gcf, 'init_matrix.png');
+
+    A = process_matrix_parallel(A, n);
+    disp('Matrix after processing:');
+    disp(A(1:5, 1:5));  % 显示处理后矩阵的前5x5部分
+
+    % 绘制处理后的矩阵
+    figure;
+    imagesc(A);
+    colorbar;
+    title('Matrix after processing');
+    xlabel('Column Index');
+    ylabel('Row Index');
+    saveas(gcf, 'processed_matrix.png');
+
+    % 关闭并行池
+    delete(gcp('nocreate'))
+end
+
+function A = init_matrix_parallel(n)
+    % 初始化矩阵
+    A = zeros(n, n);
+    parfor i = 1:n
+        row = zeros(1, n);
+        row(i) = 1.0;
+        for j = i+1:n
+            row(j) = rand();
+        end
+        A(i, :) = row;
+    end
+
+    for k = 1:n
+        row_k = A(k, :); % 提前将行取出
+        parfor i = k+1:n
+            A(i, :) = A(i, :) + row_k;
+        end
+    end
+end
+
+function A = process_matrix_parallel(A, n)
+    % 执行矩阵操作
+    for k = 1:n
+        A(k, k+1:n) = A(k, k+1:n) * 1.0 / A(k, k);
+        A(k, k) = 1.0;
+
+        row_k_part = A(k, k+1:n); % 提前将行的部分取出
+        
+        temp_A = A; % 创建临时矩阵
+        
+        parfor i = k+1:n
+            temp_A(i, k+1:n) = temp_A(i, k+1:n) - A(i, k) * row_k_part;
+        end
+        
+        A(k+1:n, k+1:n) = temp_A(k+1:n, k+1:n); % 更新原矩阵
+        A(k+1:n, k) = 0; % 设置为零
+    end
+end
+
+% 调用主函数
+main();
