@@ -22,7 +22,6 @@ const int lieNum = 23045;
 
 
 
-
 unsigned int Act[37960][1188] = { 0 };
 unsigned int Pas[37960][1188] = { 0 };
 
