@@ -12,7 +12,6 @@ using namespace std;
 const int NUM_THREADS = 7; //线程数量
 
 
-
 unsigned int Act[43577][1363] = { 0 };
 unsigned int Pas[54274][1363] = { 0 };
 
